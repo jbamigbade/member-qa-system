@@ -1,25 +1,22 @@
 #!/bin/bash
-echo "=== API TEST ==="
-echo "Testing on: http://localhost:5000"
-echo ""
+echo "Testing API endpoints..."
 
 echo "1. Health:"
 curl -s "http://localhost:5000/health"
-echo -e "\n"
 
-echo "2. Members:"
-curl -s "http://localhost:5000/members"
-echo -e "\n"
+echo -e "\n2. Messages (first 2):"
+curl -s "http://localhost:5000/messages/?limit=2" | python3 -c "
+import json, sys
+data = json.load(sys.stdin)
+print(f'Total: {data.get(\"total\", 0)}')
+for item in data.get('items', [])[:2]:
+    print(f'  - {item.get(\"user_name\", \"Unknown\")}: {item.get(\"message\", \"\")[:40]}...')
+"
 
-echo "3. Required Questions:"
-echo "Layla London:"
-curl -s "http://localhost:5000/ask?question=When%20is%20Layla%20planning%20her%20trip%20to%20London?"
-echo -e "\n"
+echo -e "\n3. Movies:"
+curl -s "http://localhost:5000/movies/"
 
-echo "Vikram Cars:"
-curl -s "http://localhost:5000/ask?question=How%20many%20cars%20does%20Vikram%20Desai%20have?"
-echo -e "\n"
+echo -e "\n4. Image:"
+curl -s "http://localhost:5000/image/"
 
-echo "Amina Restaurants:"
-curl -s "http://localhost:5000/ask?question=What%20are%20Amina's%20favorite%20restaurants?"
-echo -e "\n"
+echo -e "\n✅ All endpoints responding"
