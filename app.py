@@ -1,6 +1,8 @@
 from flask import Flask, request, jsonify
 import requests
 import re
+import os
+import sys
 
 app = Flask(__name__)
 
@@ -10,11 +12,11 @@ API_BASE = "https://november7-730026606190.europe-west1.run.app"
 def get_member_data():
     """Fetch and process real member data from the external API"""
     try:
-        print("📡 Fetching data from external API...")
+        print("📡 Fetching data from external API...", file=sys.stderr)
         response = requests.get(f"{API_BASE}/messages", timeout=10)
         response.raise_for_status()
         data = response.json()
-        print(f"✅ Received {len(data.get('items', []))} messages")
+        print(f"✅ Received {len(data.get('items', []))} messages", file=sys.stderr)
         
         # Transform API data into member-focused structure
         members = {}
@@ -22,175 +24,175 @@ def get_member_data():
             user_name = item.get('user_name')
             message_content = item.get('message', '')
             
-            if user_name not in members:
+            if user_name and user_name not in members:
                 members[user_name] = {
                     'name': user_name,
                     'messages': []
                 }
             
-            members[user_name]['messages'].append({
-                'content': message_content,
-                'timestamp': item.get('timestamp', '')
-            })
+            if user_name:
+                members[user_name]['messages'].append({
+                    'content': message_content,
+                    'timestamp': item.get('timestamp', '')
+                })
+        
+        # Sort messages by timestamp for each member
+        for member in members.values():
+            member['messages'].sort(key=lambda x: x.get('timestamp', ''), reverse=True)
         
         member_list = list(members.values())
-        print(f"📊 Processed {len(member_list)} members: {[m['name'] for m in member_list]}")
+        print(f"📊 Processed {len(member_list)} members", file=sys.stderr)
         return member_list
         
     except Exception as e:
-        print(f"❌ Error fetching data: {e}")
+        print(f"❌ Error fetching data: {e}", file=sys.stderr)
         return []
 
-def search_member_messages(member, keywords):
-    """Search for keywords in member messages"""
-    relevant_messages = []
-    for msg in member.get('messages', []):
-        content = msg.get('content', '').lower()
-        if any(keyword in content for keyword in keywords):
-            relevant_messages.append(msg.get('content'))
-    return relevant_messages
-
-def answer_question(question, members):
-    """Answer natural language questions about members using real data"""
+def extract_member_name(question):
+    """Extract member name from question with fuzzy matching"""
     question_lower = question.lower()
     
-    # Extract member name with better matching
-    member_name = None
-    member_full_name = None
-    
-    # Map common names to actual member names in the data
-    name_mapping = {
-        'layla': 'Layla Kawaguchi',
-        'vikram': 'Vikram Desai', 
-        'amira': 'Amira',  # Check if Amira exists in data
-        'sophia': 'Sophia Al-Farsi',
-        'fatima': 'Fatima El-Tahir',
-        'hans': 'Hans Müller',
-        'amina': 'Amina Van Den Berg',
-        'armand': 'Armand Dupont',
-        'lily': "Lily O'Sullivan",
-        'lorenzo': 'Lorenzo Cavalli',
-        'thiago': 'Thiago Monteiro'
+    # Common name variations and their mappings
+    name_patterns = {
+        'layla': ['layla', 'kawaguchi'],
+        'vikram': ['vikram', 'desai'],
+        'amira': ['amira'],
+        'sophia': ['sophia', 'al-farsi', 'alfarsi'],
+        'fatima': ['fatima', 'el-tahir', 'eltahir'],
+        'hans': ['hans', 'müller', 'muller'],
+        'amina': ['amina', 'van den berg'],
+        'armand': ['armand', 'dupont'],
+        'lily': ['lily', "o'sullivan", 'osullivan'],
+        'lorenzo': ['lorenzo', 'cavalli'],
+        'thiago': ['thiago', 'monteiro']
     }
     
-    for short_name, full_name in name_mapping.items():
-        if short_name in question_lower:
-            member_name = short_name
-            member_full_name = full_name
-            break
-    
-    if not member_name:
-        available = [m['name'] for m in members]
-        return f"I couldn't identify which member. Available: {', '.join(available)}"
-    
-    # Find the member
-    member = None
-    for m in members:
-        if member_full_name and m.get('name') == member_full_name:
-            member = m
-            break
-        elif member_name in m.get('name', '').lower():
-            member = m
-            break
-    
-    if not member:
-        available = [m['name'] for m in members]
-        return f"Member '{member_name}' not found. Available: {', '.join(available)}"
-    
-    print(f"🔍 Analyzing {len(member['messages'])} messages for {member['name']}")
-    
-    # Answer specific question types with better search
-    if 'london' in question_lower:
-        london_messages = search_member_messages(member, ['london'])
-        if london_messages:
-            # Try to extract timing information
-            for msg in london_messages:
-                # Look for dates
-                date_match = re.search(r'\b\d{4}-\d{2}-\d{2}\b', msg)
-                if date_match:
-                    return f"{member['name']} is planning a trip to London around {date_match.group()}."
-                
-                # Look for time references
-                time_ref = re.search(r'\b(next week|next month|in june|in july|soon|this weekend)\b', msg.lower())
-                if time_ref:
-                    return f"{member['name']} is planning a trip to London {time_ref.group()}."
-            
-            return f"{member['name']} mentioned London in their messages."
-        return f"I couldn't find London trip information for {member['name']}."
-    
-    elif 'car' in question_lower:
-        car_messages = search_member_messages(member, ['car', 'vehicle'])
-        if car_messages:
-            car_count = 1  # Default assumption
-            for msg in car_messages:
-                # Look for numbers
-                numbers = re.findall(r'\b(\d+)\s+car', msg.lower())
-                if numbers:
-                    car_count = int(numbers[0])
-                elif 'second' in msg.lower() or 'another' in msg.lower() or 'two' in msg.lower():
-                    car_count = 2
-            
-            return f"{member['name']} has {car_count} car(s)."
-        return f"I couldn't find car information for {member['name']}."
-    
-    elif 'restaurant' in question_lower:
-        restaurant_messages = search_member_messages(member, ['restaurant', 'dinner', 'food', 'eat'])
-        if restaurant_messages:
-            restaurants = []
-            for msg in restaurant_messages:
-                # Extract quoted names
-                quoted = re.findall(r'["\']([^"\']+?)["\']', msg)
-                restaurants.extend(quoted)
-                
-                # Extract capitalized restaurant-like names
-                capitalized = re.findall(r'\b([A-Z][a-z]+(?:\s+[A-Z][a-z]+)*)\b', msg)
-                restaurants.extend([r for r in capitalized if len(r) > 3])
-            
-            if restaurants:
-                unique = list(set(restaurants))
-                return f"{member['name']}'s mentioned restaurants: {', '.join(unique)}."
-            
-            return f"{member['name']} mentioned restaurants in their messages."
-        return f"I couldn't find restaurant information for {member['name']}."
-    
-    else:
-        # Return most recent message as general response
-        if member['messages']:
-            latest = member['messages'][0]['content']
-            if len(latest) > 100:
-                latest = latest[:100] + "..."
-            return f"{member['name']}'s latest: {latest}"
-        return f"I found {member['name']} but no messages."
+    for canonical_name, patterns in name_patterns.items():
+        if any(pattern in question_lower for pattern in patterns):
+            return canonical_name
+    return None
 
-@app.route('/ask', methods=['GET'])
-def ask_question():
-    """Question-answering endpoint"""
-    question = request.args.get('question', '').strip()
+def find_member_by_name(members, name):
+    """Find member by name with fuzzy matching"""
+    name_lower = name.lower()
     
-    if not question:
-        return jsonify({"answer": "Please provide a question parameter."})
+    for member in members:
+        member_name = member.get('name', '').lower()
+        if name_lower in member_name or any(part in member_name for part in name_lower.split()):
+            return member
     
-    members = get_member_data()
-    
-    if not members:
-        return jsonify({"answer": "Sorry, I couldn't fetch the member data."})
-    
-    answer = answer_question(question, members)
-    
-    return jsonify({"answer": answer})
+    return None
+
+@app.route('/')
+def home():
+    return jsonify({
+        "message": "Member QA System API",
+        "status": "running",
+        "endpoints": {
+            "/health": "GET - System health check",
+            "/members": "GET - List all members", 
+            "/ask?question=text": "GET - Ask a question about members"
+        },
+        "example": "Visit /ask?question=When%20is%20Layla%20planning%20her%20trip%20to%20London"
+    })
 
 @app.route('/health', methods=['GET'])
 def health_check():
-    return jsonify({"status": "healthy"})
+    return jsonify({
+        "status": "healthy", 
+        "service": "Member QA System",
+        "timestamp": "2025-11-12T08:30:00Z"
+    })
 
 @app.route('/members', methods=['GET'])
 def list_members():
     """List available members"""
-    members = get_member_data()
+    try:
+        members = get_member_data()
+        member_names = [m['name'] for m in members]
+        return jsonify({
+            "members": member_names,
+            "total": len(members),
+            "status": "success"
+        })
+    except Exception as e:
+        return jsonify({
+            "error": str(e),
+            "status": "error"
+        }), 500
+
+@app.route('/ask', methods=['GET'])
+def ask_question():
+    """Question-answering endpoint"""
+    try:
+        question = request.args.get('question', '').strip()
+        
+        if not question:
+            return jsonify({
+                "answer": "Please provide a question parameter.",
+                "example": "/ask?question=When%20is%20Layla%20planning%20her%20trip%20to%20London"
+            })
+        
+        print(f"❓ Question: {question}", file=sys.stderr)
+        members = get_member_data()
+        
+        if not members:
+            return jsonify({
+                "answer": "Sorry, I couldn't fetch the member data from the external API."
+            })
+        
+        # Extract member name from question
+        member_name = extract_member_name(question)
+        if not member_name:
+            available_names = [m['name'] for m in members]
+            return jsonify({
+                "answer": f"Which member are you asking about? Available members: {', '.join(available_names[:5])}..."
+            })
+        
+        # Find the specific member
+        member = find_member_by_name(members, member_name)
+        if not member:
+            available_names = [m['name'] for m in members]
+            return jsonify({
+                "answer": f"Member '{member_name}' not found. Available: {', '.join(available_names[:5])}..."
+            })
+        
+        # Simple answer based on member's most recent messages
+        recent_messages = member['messages'][:3]  # Get 3 most recent messages
+        if recent_messages:
+            summary = " ".join([msg['content'][:100] + "..." if len(msg['content']) > 100 else msg['content'] 
+                              for msg in recent_messages])
+            return jsonify({
+                "answer": f"Based on {member['name']}'s recent activity: {summary}",
+                "member": member['name'],
+                "message_count": len(member['messages'])
+            })
+        else:
+            return jsonify({
+                "answer": f"I found {member['name']} but there are no messages available."
+            })
+            
+    except Exception as e:
+        print(f"❌ Error in ask endpoint: {e}", file=sys.stderr)
+        return jsonify({
+            "answer": "Sorry, an error occurred while processing your question.",
+            "error": str(e)
+        }), 500
+
+# Add a catch-all route for 404 errors
+@app.errorhandler(404)
+def not_found(error):
     return jsonify({
-        "members": [m['name'] for m in members],
-        "total": len(members)
-    })
+        "error": "Endpoint not found",
+        "available_endpoints": [
+            "/",
+            "/health", 
+            "/members",
+            "/ask"
+        ]
+    }), 404
 
 if __name__ == '__main__':
-    app.run(host='0.0.0.0', port=5000, debug=False)
+    port = int(os.environ.get('PORT', 5000))
+    print(f"🚀 Starting Member QA System on port {port}", file=sys.stderr)
+    app.run(host='0.0.0.0', port=port, debug=False)
